@@ -84,8 +84,8 @@ private:
     /// Rule values per footprint pair and side, evaluated once per move
     std::map<std::tuple<FOOTPRINT*, FOOTPRINT*, PCB_LAYER_ID>, int> m_clearanceCache;
 
-    /// Moving courtyards (footprint, courtyard layer, clearance) to outline at the rule distance
-    std::set<std::tuple<FOOTPRINT*, PCB_LAYER_ID, int>> m_outlines;
+    /// Courtyards (footprint, courtyard layer, clearance) a moving one is too close to
+    std::set<std::tuple<FOOTPRINT*, PCB_LAYER_ID, int>> m_keepOuts;
 
     std::shared_ptr<KIGFX::VIEW_OVERLAY> m_overlay;
 };

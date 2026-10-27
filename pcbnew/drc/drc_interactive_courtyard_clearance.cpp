@@ -22,12 +22,11 @@
  */
 
 #include <drc/drc_interactive_courtyard_clearance.h>
-#include <base_units.h>
 #include <board_design_settings.h>
 #include <drc/drc_engine.h>
 #include <drc/drc_item.h>
 #include <drc/drc_rule.h>
-#include <gal/painter.h>
+#include <gal/color4d.h>
 #include <pad.h>
 #include <zone.h>
 #include <geometry/shape_poly_set.h>
@@ -100,7 +99,7 @@ void DRC_INTERACTIVE_COURTYARD_CLEARANCE::testCourtyardClearances()
                     m_itemsInConflict.insert( fpB );
 
                     if( clearance > 0 )
-                        m_outlines.emplace( fpB, F_CrtYd, clearance );
+                        m_keepOuts.emplace( fpA, F_CrtYd, clearance );
                  }
             }
 
@@ -115,7 +114,7 @@ void DRC_INTERACTIVE_COURTYARD_CLEARANCE::testCourtyardClearances()
                     m_itemsInConflict.insert( fpB );
 
                     if( clearance > 0 )
-                        m_outlines.emplace( fpB, B_CrtYd, clearance );
+                        m_keepOuts.emplace( fpA, B_CrtYd, clearance );
                 }
             }
 
@@ -264,7 +263,7 @@ void DRC_INTERACTIVE_COURTYARD_CLEARANCE::Init( BOARD* aBoard )
 bool DRC_INTERACTIVE_COURTYARD_CLEARANCE::Run()
 {
     m_itemsInConflict.clear();
-    m_outlines.clear();
+    m_keepOuts.clear();
     m_largestCourtyardClearance = 0;
 
     DRC_CONSTRAINT constraint;
@@ -306,7 +305,7 @@ void DRC_INTERACTIVE_COURTYARD_CLEARANCE::UpdateConflicts( KIGFX::VIEW* aView,
         }
     }
 
-    if( m_outlines.empty() && !m_overlay )
+    if( m_keepOuts.empty() && !m_overlay )
         return;
 
     if( !m_overlay )
@@ -315,18 +314,24 @@ void DRC_INTERACTIVE_COURTYARD_CLEARANCE::UpdateConflicts( KIGFX::VIEW* aView,
     int maxError = m_board->GetDesignSettings().m_MaxError;
 
     m_overlay->Clear();
-    m_overlay->SetIsFill( false );
-    m_overlay->SetIsStroke( true );
-    m_overlay->SetStrokeColor( aView->GetPainter()->GetSettings()->GetLayerColor( LAYER_DRC_ERROR ) );
-    m_overlay->SetLineWidth( pcbIUScale.mmToIU( 0.1 ) );
+    m_overlay->SetIsFill( true );
+    m_overlay->SetIsStroke( false );
 
-    // The distance the rules ask for around the moving courtyard
-    for( const auto& [footprint, layer, clearance] : m_outlines )
+    // As the router shows a collision: the courtyard in green over the keep-out its rule asks
+    // for.  All keep-outs go first, so none covers another courtyard.
+    m_overlay->SetFillColor( COLOR4D( DARKDARKGRAY ).WithAlpha( 0.7 ) );
+
+    for( const auto& [footprint, layer, clearance] : m_keepOuts )
     {
-        SHAPE_POLY_SET outline = footprint->GetCourtyard( layer );
-        outline.Inflate( clearance, CORNER_STRATEGY::ROUND_ALL_CORNERS, maxError );
-        m_overlay->Polygon( outline );
+        SHAPE_POLY_SET keepOut = footprint->GetCourtyard( layer );
+        keepOut.Inflate( clearance, CORNER_STRATEGY::ROUND_ALL_CORNERS, maxError );
+        m_overlay->Polygon( keepOut );
     }
+
+    m_overlay->SetFillColor( COLOR4D( 0, 1, 0, 1 ) );
+
+    for( const auto& entry : m_keepOuts )
+        m_overlay->Polygon( std::get<0>( entry )->GetCourtyard( std::get<1>( entry ) ) );
 
     aView->Update( m_overlay.get() );
 }
