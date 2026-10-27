@@ -20,11 +20,8 @@
 /**
  * @file test_drc_interactive_clearance.cpp
  *
- * The live clearance check run while moving items must flag a foreign-net track crossing a moving
- * pad, and must clear once the pad has been moved away.
- *
- * Fixture (qa/data/pcbnew/issue24355/): netclass clearance 0.2 mm, one footprint at (150, 100) whose
- * pad "1" (PTH, 1 mm, no net) sits at (151.6, 100).
+ * The live checks run while moving items must flag what DRC would flag, and clear once the items
+ * have been moved apart.
  */
 
 #include <qa_utils/wx_utils/unit_test_utils.h>
@@ -37,7 +34,11 @@
 #include <pcb_track.h>
 #include <drc/drc_engine.h>
 #include <drc/drc_interactive_clearance.h>
+#include <drc/drc_interactive_courtyard_clearance.h>
 #include <settings/settings_manager.h>
+
+#include <filesystem>
+#include <fstream>
 
 
 struct DRC_INTERACTIVE_CLEARANCE_FIXTURE
@@ -58,6 +59,10 @@ struct DRC_INTERACTIVE_CLEARANCE_FIXTURE
 };
 
 
+/**
+ * A foreign-net track crossing a moving pad.  Fixture issue24355: netclass clearance 0.2 mm, one
+ * footprint at (150, 100) whose pad "1" (PTH, 1 mm, no net) sits at (151.6, 100).
+ */
 BOOST_FIXTURE_TEST_CASE( DRCInteractiveClearance, DRC_INTERACTIVE_CLEARANCE_FIXTURE )
 {
     KI_TEST::LoadBoard( m_settingsManager, "issue24355/issue24355", m_board );
@@ -90,4 +95,61 @@ BOOST_FIXTURE_TEST_CASE( DRCInteractiveClearance, DRC_INTERACTIVE_CLEARANCE_FIXT
 
     checker.Run();
     BOOST_CHECK_EQUAL( checker.GetViolationCount(), 0 );
+}
+
+
+/**
+ * A courtyard_clearance rule, not only overlapping courtyards.  Fixture issue24264: C1 and R1,
+ * 0603 footprints on the front.
+ */
+BOOST_FIXTURE_TEST_CASE( DRCInteractiveCourtyardRules, DRC_INTERACTIVE_CLEARANCE_FIXTURE )
+{
+    KI_TEST::TEMPORARY_DIRECTORY tmpDir( "kicad_interactive_courtyard_rules", "" );
+    const std::filesystem::path  rulePath = tmpDir.GetPath() / "courtyard_rules.kicad_dru";
+
+    {
+        std::ofstream ruleFile( rulePath );
+        ruleFile << "(version 1)\n"
+                 << "(rule tall (constraint courtyard_clearance (min 3mm))\n"
+                 << "    (condition \"A.Reference == 'R1' && B.Reference == 'C1'\"))\n";
+    }
+
+    KI_TEST::LoadBoard( m_settingsManager, "issue24264/issue24264", m_board );
+    BOOST_REQUIRE_MESSAGE( m_board, "Failed to load board issue24264" );
+
+    BOARD_DESIGN_SETTINGS& bds = m_board->GetDesignSettings();
+    bds.m_DRCEngine->InitEngine( wxFileName( rulePath.string() ) );
+
+    FOOTPRINT* r1 = m_board->FindFootprintByReference( wxT( "R1" ) );
+    FOOTPRINT* c1 = m_board->FindFootprintByReference( wxT( "C1" ) );
+    BOOST_REQUIRE( r1 && c1 );
+
+    // R1 is the one moving, so the rule above only matches with the footprints swapped
+    r1->SetOrientation( ANGLE_0 );
+    r1->SetSelected();
+
+    // Puts R1's courtyard aGap to the right of C1's, centred on it
+    auto placeR1 =
+            [&]( double aGap )
+            {
+                BOX2I r = r1->GetCourtyard( F_CrtYd ).BBox();
+                BOX2I c = c1->GetCourtyard( F_CrtYd ).BBox();
+
+                r1->Move( VECTOR2I( c.GetRight() + pcbIUScale.mmToIU( aGap ) - r.GetLeft(),
+                                    c.GetCenter().y - r.GetCenter().y ) );
+            };
+
+    DRC_INTERACTIVE_COURTYARD_CLEARANCE checker( bds.m_DRCEngine );
+
+    checker.Init( m_board.get() );
+    checker.m_FpInMove.push_back( r1 );
+
+    placeR1( 1.0 );
+    checker.Run();
+    BOOST_CHECK( checker.GetConflicts().count( r1 ) );
+    BOOST_CHECK( checker.GetConflicts().count( c1 ) );
+
+    placeR1( 5.0 );
+    checker.Run();
+    BOOST_CHECK( checker.GetConflicts().empty() );
 }

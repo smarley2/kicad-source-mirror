@@ -103,47 +103,6 @@ static int netCodeOf( const BOARD_ITEM* aItem )
 }
 
 
-/// Castellated pads and edge connector fingers sit on the board edge by design.
-static bool sitsOnEdge( const BOARD_ITEM* aItem )
-{
-    if( aItem->Type() != PCB_PAD_T )
-        return false;
-
-    const PAD* pad = static_cast<const PAD*>( aItem );
-
-    return pad->GetProperty() == PAD_PROP::CASTELLATED || pad->GetAttribute() == PAD_ATTRIB::CONN;
-}
-
-
-/// DRC treats a non-round NPTH as milled, so it takes edge clearances like the board outline.
-static bool isMilledSlot( const BOARD_ITEM* aItem )
-{
-    if( aItem->Type() != PCB_PAD_T )
-        return false;
-
-    const PAD* pad = static_cast<const PAD*>( aItem );
-
-    return pad->GetAttribute() == PAD_ATTRIB::NPTH && pad->HasHole()
-           && pad->GetDrillSizeX() != pad->GetDrillSizeY();
-}
-
-
-/// A copy of an edge cut as DRC measures it: to the middle of the line, so with no width.
-static PCB_SHAPE* zeroWidthCopy( const BOARD_ITEM* aEdge )
-{
-    PCB_SHAPE* copy = static_cast<PCB_SHAPE*>( aEdge->Clone() );
-
-    if( copy->IsOnLayer( Edge_Cuts ) )
-    {
-        STROKE_PARAMS stroke = copy->GetStroke();
-        stroke.SetWidth( 0 );
-        copy->SetStroke( stroke );
-    }
-
-    return copy;
-}
-
-
 DRC_INTERACTIVE_CLEARANCE::DRC_INTERACTIVE_CLEARANCE( const std::shared_ptr<DRC_ENGINE>& aDRCEngine ) :
         DRC_TEST_PROVIDER(),
         m_largestClearance( 0 ),
@@ -171,12 +130,10 @@ void DRC_INTERACTIVE_CLEARANCE::Init( BOARD* aBoard, const std::vector<BOARD_ITE
 
     // Already includes the worst clearance and hole clearance rules
     m_largestClearance = m_board->GetMaxClearanceValue();
-    m_largestEdgeClearance = 0;
 
     DRC_CONSTRAINT worst;
-
-    if( m_drcEngine->QueryWorstConstraint( EDGE_CLEARANCE_CONSTRAINT, worst ) )
-        m_largestEdgeClearance = worst.GetValue().Min();
+    m_largestEdgeClearance = m_drcEngine->QueryWorstConstraint( EDGE_CLEARANCE_CONSTRAINT, worst )
+                                     ? worst.GetValue().Min() : 0;
 
     std::set<BOARD_ITEM*> moving;
 
@@ -223,7 +180,13 @@ void DRC_INTERACTIVE_CLEARANCE::Init( BOARD* aBoard, const std::vector<BOARD_ITE
             {
                 if( !moving.count( item ) )
                 {
-                    m_edges.emplace_back( zeroWidthCopy( item ) );
+                    // DRC measures to the middle of an edge cut line, so with no width
+                    PCB_SHAPE* edge = static_cast<PCB_SHAPE*>( item->Clone() );
+
+                    if( edge->IsOnLayer( Edge_Cuts ) )
+                        edge->SetWidth( 0 );
+
+                    m_edges.emplace_back( edge );
 
                     for( PCB_LAYER_ID layer : { Edge_Cuts, Margin } )
                     {
@@ -235,12 +198,17 @@ void DRC_INTERACTIVE_CLEARANCE::Init( BOARD* aBoard, const std::vector<BOARD_ITE
                 return true;
             } );
 
-    // DRC treats milled slots as board edges
+    // DRC treats a non-round NPTH as milled, so it takes edge clearances like the board outline
     forEachGeometryItem( { PCB_PAD_T }, LSET::AllLayersMask(),
             [&]( BOARD_ITEM* item ) -> bool
             {
-                if( !moving.count( item ) && isMilledSlot( item ) )
-                    m_edgeTree.Insert( item, Edge_Cuts, m_largestEdgeClearance );
+                PAD* pad = static_cast<PAD*>( item );
+
+                if( !moving.count( pad ) && pad->GetAttribute() == PAD_ATTRIB::NPTH && pad->HasHole()
+                        && pad->GetDrillSizeX() != pad->GetDrillSizeY() )
+                {
+                    m_edgeTree.Insert( pad, Edge_Cuts, m_largestEdgeClearance );
+                }
 
                 return true;
             } );
@@ -275,7 +243,10 @@ bool DRC_INTERACTIVE_CLEARANCE::Run()
             for( BOARD_ITEM* other : others )
                 testCopper( item, shape, layer, other );
 
-            if( sitsOnEdge( item ) )
+            // Castellated pads and edge connector fingers sit on the board edge by design
+            PAD* pad = dynamic_cast<PAD*>( item );
+
+            if( pad && ( pad->GetProperty() == PAD_PROP::CASTELLATED || pad->GetAttribute() == PAD_ATTRIB::CONN ) )
                 continue;
 
             std::set<BOARD_ITEM*> edges;
