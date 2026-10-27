@@ -275,6 +275,17 @@ std::optional<TOOLBAR_CONFIGURATION> PCB_EDIT_TOOLBAR_SETTINGS::DefaultToolbarCo
                   } )
               .AppendAction( PCB_ACTIONS::drawRectangle )
               .AppendAction( PCB_ACTIONS::drawCircle )
+              .WithContextMenu(
+                  []( TOOL_MANAGER* aMgr ) -> std::unique_ptr<ACTION_MENU>
+                  {
+                      PCB_SELECTION_TOOL* selTool = aMgr->GetTool<PCB_SELECTION_TOOL>();
+                      std::unique_ptr<ACTION_MENU> menu =
+                              std::make_unique<ACTION_MENU>( false, selTool );
+
+                      menu->Add( PCB_ACTIONS::circleByDiameter, ACTION_MENU::CHECK );
+
+                      return menu;
+                  } )
               .AppendAction( PCB_ACTIONS::drawPolygon )
               .AppendAction( PCB_ACTIONS::drawBezier )
               .AppendAction( PCB_ACTIONS::placeReferenceImage )

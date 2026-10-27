@@ -414,6 +414,12 @@ TOOL_ACTION PCB_ACTIONS::arcPosture( TOOL_ACTION_ARGS()
         .LegacyHotkeyName( "Switch Track Posture" )
         .FriendlyName( _( "Switch Arc Posture" ) ) );
 
+TOOL_ACTION PCB_ACTIONS::circleByDiameter( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.InteractiveDrawing.circleByDiameter" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Draw Circles by Diameter" ) )
+        .Tooltip( _( "Draw circles from one edge point to the opposite one instead of from the center" ) ) );
+
 TOOL_ACTION PCB_ACTIONS::changeDimensionArrows( TOOL_ACTION_ARGS()
         .Name( "pcbnew.InteractiveDrawing.changeDimensionArrows" )
         .Scope( AS_CONTEXT )

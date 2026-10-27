@@ -184,6 +184,9 @@ PCBNEW_SETTINGS::PCBNEW_SETTINGS()
             reinterpret_cast<int*>( &m_ArcEditMode ),
             static_cast<int>( ARC_EDIT_MODE::KEEP_CENTER_ADJUST_ANGLE_RADIUS ) ) );
 
+    m_params.emplace_back( new PARAM<bool>( "editing.circle_by_diameter",
+            &m_CircleByDiameter, false ) );
+
     m_params.emplace_back( new PARAM<bool>( "editing.ctrl_click_highlight",
             &m_CtrlClickHighlight, false ) );
 

@@ -1468,6 +1468,14 @@ void FOOTPRINT_EDIT_FRAME::setupUIConditions()
     mgr->SetConditions( ACTIONS::pointEditorArcKeepRadius,   CHECK( isArcKeepRadiusMode ) );
     // clang-format on
 
+    const auto isCircleByDiameter =
+            [this]( const SELECTION& )
+            {
+                return GetSettings()->m_CircleByDiameter;
+            };
+
+    mgr->SetConditions( PCB_ACTIONS::circleByDiameter, CHECK( isCircleByDiameter ) );
+
 // Only enable a tool if the part is edtable
 #define CURRENT_EDIT_TOOL( action )                                                               \
             mgr->SetConditions( action, ACTION_CONDITIONS().Enable( haveFootprintCond )           \

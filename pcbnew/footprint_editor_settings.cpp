@@ -118,6 +118,9 @@ FOOTPRINT_EDITOR_SETTINGS::FOOTPRINT_EDITOR_SETTINGS() :
     m_params.emplace_back( new PARAM<bool>( "editing.polar_coords",
             &m_PolarCoords, false ) );
 
+    m_params.emplace_back( new PARAM<bool>( "editing.circle_by_diameter",
+            &m_CircleByDiameter, false ) );
+
     m_params.emplace_back( new PARAM<bool>( "origin_invert_x_axis",
             &m_DisplayInvertXAxis, false ) );
 

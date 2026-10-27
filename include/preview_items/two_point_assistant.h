@@ -42,7 +42,8 @@ enum class GEOM_SHAPE
     ARC,
     CIRCLE,
     POLYGON,
-    CURVE
+    CURVE,
+    CIRCLE_DIAMETER     ///< A circle drawn from one edge point to the opposite one
 };
 
 /**
@@ -83,6 +84,8 @@ public:
     }
 
     void SetUnits( EDA_UNITS aUnits ) { m_units = aUnits; }
+
+    void SetShape( GEOM_SHAPE aShape ) { m_shape = aShape; }
 
 private:
     const TWO_POINT_GEOMETRY_MANAGER& m_constructMan;

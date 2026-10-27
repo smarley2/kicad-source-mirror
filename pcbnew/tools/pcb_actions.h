@@ -243,6 +243,9 @@ public:
     /// Switch posture when drawing arc
     static TOOL_ACTION arcPosture;
 
+    /// Switch the circle tool between center and diameter mode
+    static TOOL_ACTION circleByDiameter;
+
     /// Switch between dimension arrow directions
     static TOOL_ACTION changeDimensionArrows;
 

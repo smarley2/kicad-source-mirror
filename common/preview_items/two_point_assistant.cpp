@@ -93,13 +93,13 @@ void TWO_POINT_ASSISTANT::ViewDraw( int aLayer, KIGFX::VIEW* aView ) const
         cursorStrings.push_back( DimensionLabel( "x", std::abs( radVec.x ), m_iuScale, m_units ) );
         cursorStrings.push_back( DimensionLabel( "y", std::abs( radVec.y ), m_iuScale, m_units ) );
     }
-    else if( m_shape == GEOM_SHAPE::CIRCLE )
+    else if( m_shape == GEOM_SHAPE::CIRCLE || m_shape == GEOM_SHAPE::CIRCLE_DIAMETER )
     {
         KIGFX::PREVIEW::DRAW_CONTEXT preview_ctx( *aView );
         preview_ctx.DrawLine( origin, end, false );
 
-        cursorStrings.push_back(
-                DimensionLabel( "r", radVec.EuclideanNorm(), m_iuScale, m_units ) );
+        cursorStrings.push_back( DimensionLabel( m_shape == GEOM_SHAPE::CIRCLE ? "r" : "d",
+                                                 radVec.EuclideanNorm(), m_iuScale, m_units ) );
     }
 
     // place the text next to cursor, on opposite side from drawing

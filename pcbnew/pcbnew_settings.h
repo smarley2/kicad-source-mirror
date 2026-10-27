@@ -118,13 +118,15 @@ public:
 
     double m_FootprintViewerZoom;               ///< The last zoom level used (0 for auto)
     bool   m_FootprintViewerAutoZoomOnSelect;   ///< true to use automatic zoom on fp selection
+    bool   m_CircleByDiameter;                  ///< Draw circles from one edge point to the opposite one
 
     VIEWERS_DISPLAY_OPTIONS m_ViewersDisplay;
 
     PCB_VIEWERS_SETTINGS_BASE( const std::string& aFilename, int aSchemaVersion ):
         APP_SETTINGS_BASE( aFilename, aSchemaVersion ),
         m_FootprintViewerZoom( 1.0 ),
-        m_FootprintViewerAutoZoomOnSelect( true )
+        m_FootprintViewerAutoZoomOnSelect( true ),
+        m_CircleByDiameter( false )
     {
         m_ViewersDisplay.m_AngleSnapMode = LEADER_MODE::DIRECT;
         m_ViewersDisplay.m_DisplayGraphicsFill = true;

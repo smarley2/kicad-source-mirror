@@ -242,6 +242,12 @@ bool DRAWING_TOOL::Init()
                 return m_mode == MODE::ARC;
             };
 
+    auto circleToolActive =
+            [this]( const SELECTION& aSel )
+            {
+                return m_mode == MODE::CIRCLE;
+            };
+
     auto viaToolActive =
             [this]( const SELECTION& aSel )
             {
@@ -273,6 +279,7 @@ bool DRAWING_TOOL::Init()
     ctxMenu.AddItem( PCB_ACTIONS::closeOutline,          canCloseOutline, 200 );
     ctxMenu.AddItem( PCB_ACTIONS::deleteLastPoint,       canUndoPoint, 200 );
     ctxMenu.AddItem( PCB_ACTIONS::arcPosture,            arcToolActive, 200 );
+    ctxMenu.AddCheckItem( PCB_ACTIONS::circleByDiameter, circleToolActive, 200 );
     ctxMenu.AddItem( PCB_ACTIONS::spacingIncrease,       tuningToolActive, 200 );
     ctxMenu.AddItem( PCB_ACTIONS::spacingDecrease,       tuningToolActive, 200 );
     ctxMenu.AddItem( PCB_ACTIONS::amplIncrease,          tuningToolActive, 200 );
@@ -513,6 +520,15 @@ int DRAWING_TOOL::DrawCircle( const TOOL_EVENT& aEvent )
         startingPoint = std::nullopt;
     }
 
+    return 0;
+}
+
+
+int DRAWING_TOOL::ToggleCircleByDiameter( const TOOL_EVENT& aEvent )
+{
+    bool& byDiameter = m_frame->GetViewerSettingsBase()->m_CircleByDiameter;
+
+    byDiameter = !byDiameter;
     return 0;
 }
 
@@ -2344,13 +2360,15 @@ int DRAWING_TOOL::SetAnchor( const TOOL_EVENT& aEvent )
 
 /**
  * Update a #PCB_SHAPE from the current state of a #TWO_POINT_GEOMETRY_MANAGER.
+ *
+ * @param aByDiameter the two points are opposite points on a circle, not its center and edge.
  */
 static void updateSegmentFromGeometryMgr( const KIGFX::PREVIEW::TWO_POINT_GEOMETRY_MANAGER& aMgr,
-                                          PCB_SHAPE* aGraphic )
+                                          PCB_SHAPE* aGraphic, bool aByDiameter = false )
 {
     if( !aMgr.IsReset() )
     {
-        aGraphic->SetStart( aMgr.GetOrigin() );
+        aGraphic->SetStart( aByDiameter ? ( aMgr.GetOrigin() + aMgr.GetEnd() ) / 2 : aMgr.GetOrigin() );
         aGraphic->SetEnd( aMgr.GetEnd() );
     }
 }
@@ -2461,6 +2479,11 @@ bool DRAWING_TOOL::drawShape( const TOOL_EVENT& aTool, PCB_SHAPE** aGraphic,
             if( evt->Modifier( MD_CTRL ) )
                 angleSnap = LEADER_MODE::DIRECT;
         }
+
+        // Read on every event: the menus can switch it while drawing
+        const bool byDiameter = shape == SHAPE_T::CIRCLE && m_frame->GetViewerSettingsBase()->m_CircleByDiameter;
+
+        twoPointAsst.SetShape( byDiameter ? KIGFX::PREVIEW::GEOM_SHAPE::CIRCLE_DIAMETER : geomShape );
 
         grid.SetUseGrid( getView()->GetGAL()->GetGridSnapping() && !evt->DisableGridSnapping() );
         cursorPos = GetClampedCoords( grid.BestSnapAnchor( m_controls->GetMousePosition(), { m_layer }, GRID_GRAPHICS ),
@@ -2596,7 +2619,7 @@ bool DRAWING_TOOL::drawShape( const TOOL_EVENT& aTool, PCB_SHAPE** aGraphic,
                     m_frame->GetCanvas()->Refresh();
                 }
 
-                updateSegmentFromGeometryMgr( twoPointMgr, graphic );
+                updateSegmentFromGeometryMgr( twoPointMgr, graphic, byDiameter );
 
                 started = true;
             }
@@ -2659,7 +2682,7 @@ bool DRAWING_TOOL::drawShape( const TOOL_EVENT& aTool, PCB_SHAPE** aGraphic,
                 twoPointMgr.SetAngleSnap( LEADER_MODE::DIRECT );
             }
 
-            updateSegmentFromGeometryMgr( twoPointMgr, graphic );
+            updateSegmentFromGeometryMgr( twoPointMgr, graphic, byDiameter );
             m_view->Update( &m_preview );
             m_view->Update( &twoPointAsst );
         }
@@ -4434,6 +4457,7 @@ void DRAWING_TOOL::setTransitions()
     Go( &DRAWING_TOOL::DrawZone,              PCB_ACTIONS::drawPolygon.MakeEvent() );
     Go( &DRAWING_TOOL::DrawRectangle,         PCB_ACTIONS::drawRectangle.MakeEvent() );
     Go( &DRAWING_TOOL::DrawCircle,            PCB_ACTIONS::drawCircle.MakeEvent() );
+    Go( &DRAWING_TOOL::ToggleCircleByDiameter, PCB_ACTIONS::circleByDiameter.MakeEvent() );
     Go( &DRAWING_TOOL::DrawArc,               PCB_ACTIONS::drawArc.MakeEvent() );
     Go( &DRAWING_TOOL::DrawBezier,            PCB_ACTIONS::drawBezier.MakeEvent() );
     Go( &DRAWING_TOOL::DrawDimension,         PCB_ACTIONS::drawAlignedDimension.MakeEvent() );

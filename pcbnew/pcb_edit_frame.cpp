@@ -1226,6 +1226,15 @@ void PCB_EDIT_FRAME::setupUIConditions()
     mgr->SetConditions( ACTIONS::pointEditorArcKeepEndpoint, CHECK( isArcKeepEndpointMode ) );
     mgr->SetConditions( ACTIONS::pointEditorArcKeepRadius,   CHECK( isArcKeepRadiusMode ) );
 
+    const auto isCircleByDiameter =
+            [this]( const SELECTION& )
+            {
+                PCBNEW_SETTINGS* cfg = GetPcbNewSettings();
+                return cfg && cfg->m_CircleByDiameter;
+            };
+
+    mgr->SetConditions( PCB_ACTIONS::circleByDiameter, CHECK( isCircleByDiameter ) );
+
     auto isHighlightMode =
             [this]( const SELECTION& )
             {

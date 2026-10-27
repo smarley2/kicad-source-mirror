@@ -133,6 +133,12 @@ public:
     int DrawCircle( const TOOL_EVENT& aEvent );
 
     /**
+     * Switch the circle tool between drawing from the center and drawing from one edge point to
+     * the opposite one.
+     */
+    int ToggleCircleByDiameter( const TOOL_EVENT& aEvent );
+
+    /**
      * Start interactively drawing an arc.
      *
      * After invoking the function it expects the user to first click on a point that is going
