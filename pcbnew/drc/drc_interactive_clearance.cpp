@@ -21,13 +21,12 @@
 
 #include <algorithm>
 
-#include <base_units.h>
 #include <board_design_settings.h>
 #include <core/kicad_algo.h>
 #include <drc/drc_engine.h>
 #include <drc/drc_rule.h>
 #include <footprint.h>
-#include <gal/painter.h>
+#include <gal/color4d.h>
 #include <geometry/shape_poly_set.h>
 #include <geometry/shape_segment.h>
 #include <pad.h>
@@ -263,7 +262,7 @@ bool DRC_INTERACTIVE_CLEARANCE::Run()
                 int clearance = getClearance( EDGE_CLEARANCE_CONSTRAINT, edge, item, UNDEFINED_LAYER );
 
                 if( collide( shape.get(), edgeShape.get(), clearance ) )
-                    report( item, edge, shape, nullptr, clearance );
+                    report( item, edge, edgeShape, clearance );
             }
         }
     }
@@ -326,7 +325,7 @@ void DRC_INTERACTIVE_CLEARANCE::testCopper( BOARD_ITEM* aItem, const std::shared
 
         if( clearance > 0 && collide( aShape.get(), otherShape.get(), clearance ) )
         {
-            report( aItem, aOther, aShape, otherShape, clearance );
+            report( aItem, aOther, otherShape, clearance );
             return;
         }
     }
@@ -339,7 +338,7 @@ void DRC_INTERACTIVE_CLEARANCE::testCopper( BOARD_ITEM* aItem, const std::shared
 
         if( collide( hole.get(), otherShape.get(), clearance ) )
         {
-            report( aItem, aOther, hole, otherShape, clearance );
+            report( aItem, aOther, otherShape, clearance );
             return;
         }
     }
@@ -350,18 +349,17 @@ void DRC_INTERACTIVE_CLEARANCE::testCopper( BOARD_ITEM* aItem, const std::shared
         int clearance = getClearance( HOLE_CLEARANCE_CONSTRAINT, aOther, aItem, aLayer );
 
         if( collide( aShape.get(), otherHole.get(), clearance ) )
-            report( aItem, aOther, aShape, otherHole, clearance );
+            report( aItem, aOther, otherHole, clearance );
     }
 }
 
 
 void DRC_INTERACTIVE_CLEARANCE::report( BOARD_ITEM* aItem, BOARD_ITEM* aOther,
-                                        std::shared_ptr<SHAPE> aShape,
                                         std::shared_ptr<SHAPE> aOtherShape, int aClearance )
 {
     // A pair may collide on several layers; one mark is enough
     if( m_reported.insert( { aItem, aOther } ).second )
-        m_violations.push_back( { std::move( aShape ), std::move( aOtherShape ), aClearance } );
+        m_violations.push_back( { aOther, std::move( aOtherShape ), aClearance } );
 }
 
 
@@ -375,35 +373,43 @@ void DRC_INTERACTIVE_CLEARANCE::UpdateConflicts( KIGFX::VIEW* aView )
         m_overlay = aView->MakeOverlay();
     }
 
-    COLOR4D color = aView->GetPainter()->GetSettings()->GetLayerColor( LAYER_DRC_ERROR );
-    int     maxError = m_board->GetDesignSettings().m_MaxError;
+    int                         maxError = m_board->GetDesignSettings().m_MaxError;
+    std::vector<SHAPE_POLY_SET> items;
 
     m_overlay->Clear();
-    m_overlay->SetStrokeColor( color );
-    m_overlay->SetFillColor( color.WithAlpha( 0.4 ) );
-    m_overlay->SetLineWidth( pcbIUScale.mmToIU( 0.1 ) );
+    m_overlay->SetIsFill( true );
+    m_overlay->SetIsStroke( false );
+
+    // As the router shows a collision: the item in green over the keep-out its clearance asks
+    // for.  All keep-outs go first, so none covers another item.
+    m_overlay->SetFillColor( COLOR4D( DARKDARKGRAY ).WithAlpha( 0.7 ) );
 
     for( const VIOLATION& violation : m_violations )
     {
-        if( violation.m_otherShape )
-        {
-            SHAPE_POLY_SET other;
-            violation.m_otherShape->TransformToPolygon( other, maxError, ERROR_OUTSIDE );
+        SHAPE_POLY_SET& item = items.emplace_back();
+        SHAPE_POLY_SET  keepOut;
 
-            m_overlay->SetIsFill( true );
-            m_overlay->SetIsStroke( false );
-            m_overlay->Polygon( other );
+        violation.m_shape->TransformToPolygon( item, maxError, ERROR_OUTSIDE );
+
+        // An edge cut is measured to its middle, a line with no area to inflate
+        if( violation.m_item->IsOnLayer( Edge_Cuts ) || violation.m_item->IsOnLayer( Margin ) )
+        {
+            violation.m_item->TransformShapeToPolygon( keepOut, Edge_Cuts, violation.m_clearance, maxError,
+                                                       ERROR_OUTSIDE );
+        }
+        else
+        {
+            keepOut = item;
+            keepOut.Inflate( violation.m_clearance, CORNER_STRATEGY::ROUND_ALL_CORNERS, maxError );
         }
 
-        // The keep-out the rules ask for around the moving copper
-        SHAPE_POLY_SET halo;
-        violation.m_shape->TransformToPolygon( halo, maxError, ERROR_OUTSIDE );
-        halo.Inflate( violation.m_clearance, CORNER_STRATEGY::ROUND_ALL_CORNERS, maxError );
-
-        m_overlay->SetIsFill( false );
-        m_overlay->SetIsStroke( true );
-        m_overlay->Polygon( halo );
+        m_overlay->Polygon( keepOut );
     }
+
+    m_overlay->SetFillColor( COLOR4D( 0, 1, 0, 1 ) );
+
+    for( const SHAPE_POLY_SET& item : items )
+        m_overlay->Polygon( item );
 
     aView->Update( m_overlay.get() );
 }

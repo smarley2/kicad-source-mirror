@@ -79,8 +79,8 @@ public:
 private:
     struct VIOLATION
     {
-        std::shared_ptr<SHAPE> m_shape;         ///< Copper or hole of the moving item
-        std::shared_ptr<SHAPE> m_otherShape;    ///< Copper or hole it is too close to; null for an edge
+        BOARD_ITEM*            m_item;          ///< Copper, hole or board edge too close to the move
+        std::shared_ptr<SHAPE> m_shape;         ///< Its shape where they collide
         int                    m_clearance;     ///< Distance the rules ask for
     };
 
@@ -94,8 +94,8 @@ private:
     void testCopper( BOARD_ITEM* aItem, const std::shared_ptr<SHAPE>& aShape, PCB_LAYER_ID aLayer,
                      BOARD_ITEM* aOther );
 
-    void report( BOARD_ITEM* aItem, BOARD_ITEM* aOther, std::shared_ptr<SHAPE> aShape,
-                 std::shared_ptr<SHAPE> aOtherShape, int aClearance );
+    void report( BOARD_ITEM* aItem, BOARD_ITEM* aOther, std::shared_ptr<SHAPE> aOtherShape,
+                 int aClearance );
 
 private:
     std::vector<BOARD_ITEM*>                m_movingItems;  ///< Moving items with copper or holes
