@@ -291,6 +291,7 @@ set( PCBNEW_GENERATORS_SRCS
     )
 
 set( PCBNEW_DRC_SRCS
+    drc/drc_interactive_clearance.cpp
     drc/drc_interactive_courtyard_clearance.cpp
     drc/drc_creepage_utils.cpp
     drc/drc_report.cpp

@@ -51,6 +51,7 @@
 #include <dialogs/dialog_move_exact.h>
 #include <zone_filler.h>
 #include <drc/drc_engine.h>
+#include <drc/drc_interactive_clearance.h>
 #include <drc/drc_interactive_courtyard_clearance.h>
 #include <view/view_controls.h>
 
@@ -1009,11 +1010,15 @@ bool EDIT_TOOL::doMoveSelection( const TOOL_EVENT& aEvent, BOARD_COMMIT* aCommit
     // Used to test courtyard overlaps
     std::unique_ptr<DRC_INTERACTIVE_COURTYARD_CLEARANCE> drc_on_move = nullptr;
 
+    // Used to test copper, hole and board edge clearances
+    std::unique_ptr<DRC_INTERACTIVE_CLEARANCE> clearance_on_move = nullptr;
+
     if( showCourtyardConflicts )
     {
         std::shared_ptr<DRC_ENGINE> drcEngine = m_toolMgr->GetTool<DRC_TOOL>()->GetDRCEngine();
         drc_on_move.reset( new DRC_INTERACTIVE_COURTYARD_CLEARANCE( drcEngine ) );
         drc_on_move->Init( board );
+        clearance_on_move = std::make_unique<DRC_INTERACTIVE_CLEARANCE>( drcEngine );
     }
 
     auto configureAngleSnap =
@@ -1210,6 +1215,12 @@ bool EDIT_TOOL::doMoveSelection( const TOOL_EVENT& aEvent, BOARD_COMMIT* aCommit
                     drc_on_move->UpdateConflicts( m_toolMgr->GetView(), true );
                 }
 
+                if( showCourtyardConflicts )
+                {
+                    clearance_on_move->Run();
+                    clearance_on_move->UpdateConflicts( m_toolMgr->GetView() );
+                }
+
                 m_toolMgr->PostEvent( EVENTS::SelectedItemsMoved );
             }
             else if( !m_dragging && ( aAutoStart || !evt->IsAction( &ACTIONS::refreshPreview ) ) )
@@ -1304,6 +1315,8 @@ bool EDIT_TOOL::doMoveSelection( const TOOL_EVENT& aEvent, BOARD_COMMIT* aCommit
                                     },
                                     RECURSE_MODE::RECURSE );
                         }
+
+                        clearance_on_move->Init( board, sel_items );
                     }
 
                     // Use the mouse position over cursor, as otherwise large grids will allow only
@@ -1436,6 +1449,10 @@ bool EDIT_TOOL::doMoveSelection( const TOOL_EVENT& aEvent, BOARD_COMMIT* aCommit
                     moved_items.insert( nextItem );
                     updateStatusPopup( nextItem, itemIdx + 1, orig_items.size() );
 
+                    // The placed item is now an obstacle for the next one
+                    if( showCourtyardConflicts )
+                        clearance_on_move->Init( board, sel_items );
+
                     // Pick up new item
                     aCommit->Modify( nextItem, nullptr, RECURSE_MODE::RECURSE );
                     nextItem->Move( controls->GetCursorPosition( true ) - nextItem->GetPosition() );
@@ -1491,7 +1508,10 @@ bool EDIT_TOOL::doMoveSelection( const TOOL_EVENT& aEvent, BOARD_COMMIT* aCommit
 
     // Clear temporary COURTYARD_CONFLICT flag and ensure the conflict shadow is cleared
     if( showCourtyardConflicts )
+    {
         drc_on_move->ClearConflicts( m_toolMgr->GetView() );
+        clearance_on_move->ClearConflicts( m_toolMgr->GetView() );
+    }
 
     controls->ForceCursorPosition( false );
     controls->ShowCursor( false );
