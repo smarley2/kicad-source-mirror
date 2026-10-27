@@ -25,7 +25,17 @@
 
 #pragma once
 
+#include <map>
+#include <memory>
+#include <set>
+#include <tuple>
+
 #include <drc/drc_test_provider.h>
+
+namespace KIGFX
+{
+class VIEW_OVERLAY;
+}
 
 
 class DRC_INTERACTIVE_COURTYARD_CLEARANCE : public DRC_TEST_PROVIDER
@@ -53,15 +63,29 @@ public:
     void UpdateConflicts( KIGFX::VIEW* aView, bool aHighlightMoved );
     void ClearConflicts( KIGFX::VIEW* aView );
 
+    /// Items found in conflict by the last Run()
+    const std::set<BOARD_ITEM*>& GetConflicts() const { return m_itemsInConflict; }
+
 public:
     std::vector<FOOTPRINT*>   m_FpInMove;             // The list of moved footprints
 
 private:
     void testCourtyardClearances();
 
+    /// The courtyard_clearance rule between two footprints on a side, or -1 when it is ignored.
+    int courtyardClearance( FOOTPRINT* aStatic, FOOTPRINT* aMoving, PCB_LAYER_ID aLayer );
+
 private:
     int m_largestCourtyardClearance;
 
     std::set<BOARD_ITEM*>     m_itemsInConflict;      // The list of items in conflict
     std::vector<BOARD_ITEM*>  m_lastItemsInConflict;  // The list of items last highlighted
+
+    /// Rule values per footprint pair and side, evaluated once per move
+    std::map<std::tuple<FOOTPRINT*, FOOTPRINT*, PCB_LAYER_ID>, int> m_clearanceCache;
+
+    /// Moving courtyards (footprint, courtyard layer, clearance) to outline at the rule distance
+    std::set<std::tuple<FOOTPRINT*, PCB_LAYER_ID, int>> m_outlines;
+
+    std::shared_ptr<KIGFX::VIEW_OVERLAY> m_overlay;
 };

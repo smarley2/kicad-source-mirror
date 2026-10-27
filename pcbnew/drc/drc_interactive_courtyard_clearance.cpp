@@ -22,14 +22,19 @@
  */
 
 #include <drc/drc_interactive_courtyard_clearance.h>
+#include <base_units.h>
+#include <board_design_settings.h>
 #include <drc/drc_engine.h>
 #include <drc/drc_item.h>
 #include <drc/drc_rule.h>
+#include <gal/painter.h>
 #include <pad.h>
 #include <zone.h>
+#include <geometry/shape_poly_set.h>
 #include <geometry/shape_segment.h>
 #include <footprint.h>
 #include <view/view.h>
+#include <view/view_overlay.h>
 
 void DRC_INTERACTIVE_COURTYARD_CLEARANCE::testCourtyardClearances()
 {
@@ -87,30 +92,30 @@ void DRC_INTERACTIVE_COURTYARD_CLEARANCE::testCourtyardClearances()
             if( frontA.OutlineCount() > 0 && frontB.OutlineCount() > 0
                     && frontABBox.Intersects( frontBBBox ) )
             {
-                // Currently, do not use DRC engine for calculation time reasons
-                // DRC_CONSTRAINT constraint = m_drcEngine->EvalRules( COURTYARD_CLEARANCE_CONSTRAINT, fpA, fpB, B_Cu );
-                // constraint.GetValue().Min();
-                clearance = 0;
+                clearance = courtyardClearance( fpA, fpB, F_Cu );
 
-                if( frontA.Collide( &frontB, clearance, &actual, &pos ) )
+                if( clearance >= 0 && frontA.Collide( &frontB, clearance, &actual, &pos ) )
                 {
                     m_itemsInConflict.insert( fpA );
                     m_itemsInConflict.insert( fpB );
+
+                    if( clearance > 0 )
+                        m_outlines.emplace( fpB, F_CrtYd, clearance );
                  }
             }
 
             if( backA.OutlineCount() > 0 && backB.OutlineCount() > 0
                     && backABBox.Intersects( backBBBox ) )
             {
-                // Currently, do not use DRC engine for calculation time reasons
-                // DRC_CONSTRAINT constraint = m_drcEngine->EvalRules( COURTYARD_CLEARANCE_CONSTRAINT, fpA, fpB, B_Cu );
-                // constraint.GetValue().Min();
-                clearance = 0;
+                clearance = courtyardClearance( fpA, fpB, B_Cu );
 
-                if( backA.Collide( &backB, clearance, &actual, &pos ) )
+                if( clearance >= 0 && backA.Collide( &backB, clearance, &actual, &pos ) )
                 {
                     m_itemsInConflict.insert( fpA );
                     m_itemsInConflict.insert( fpB );
+
+                    if( clearance > 0 )
+                        m_outlines.emplace( fpB, B_CrtYd, clearance );
                 }
             }
 
@@ -217,9 +222,35 @@ void DRC_INTERACTIVE_COURTYARD_CLEARANCE::testCourtyardClearances()
 }
 
 
+int DRC_INTERACTIVE_COURTYARD_CLEARANCE::courtyardClearance( FOOTPRINT* aStatic, FOOTPRINT* aMoving,
+                                                             PCB_LAYER_ID aLayer )
+{
+    // Evaluating the rules on every mouse motion would be too slow, so each pair is evaluated
+    // once per move.  Rules that depend on where a footprint is keep their first result.
+    auto key = std::make_tuple( aStatic, aMoving, aLayer );
+    auto it = m_clearanceCache.find( key );
+
+    if( it == m_clearanceCache.end() )
+    {
+        // As in DRC_TEST_PROVIDER_COURTYARD_CLEARANCE
+        DRC_CONSTRAINT constraint = m_drcEngine->EvalRules( COURTYARD_CLEARANCE_CONSTRAINT,
+                                                            aStatic, aMoving, aLayer );
+        int            clearance = constraint.GetValue().Min();
+
+        if( constraint.GetSeverity() == RPT_SEVERITY_IGNORE )
+            clearance = -1;
+
+        it = m_clearanceCache.emplace( key, clearance ).first;
+    }
+
+    return it->second;
+}
+
+
 void DRC_INTERACTIVE_COURTYARD_CLEARANCE::Init( BOARD* aBoard )
 {
     m_board = aBoard;
+    m_clearanceCache.clear();
 
     // Update courtyard data and clear the COURTYARD_CONFLICT flag
     for( FOOTPRINT* fp: m_board->Footprints() )
@@ -233,6 +264,7 @@ void DRC_INTERACTIVE_COURTYARD_CLEARANCE::Init( BOARD* aBoard )
 bool DRC_INTERACTIVE_COURTYARD_CLEARANCE::Run()
 {
     m_itemsInConflict.clear();
+    m_outlines.clear();
     m_largestCourtyardClearance = 0;
 
     DRC_CONSTRAINT constraint;
@@ -273,6 +305,30 @@ void DRC_INTERACTIVE_COURTYARD_CLEARANCE::UpdateConflicts( KIGFX::VIEW* aView,
             m_lastItemsInConflict.push_back( item );
         }
     }
+
+    if( m_outlines.empty() && !m_overlay )
+        return;
+
+    if( !m_overlay )
+        m_overlay = aView->MakeOverlay();
+
+    int maxError = m_board->GetDesignSettings().m_MaxError;
+
+    m_overlay->Clear();
+    m_overlay->SetIsFill( false );
+    m_overlay->SetIsStroke( true );
+    m_overlay->SetStrokeColor( aView->GetPainter()->GetSettings()->GetLayerColor( LAYER_DRC_ERROR ) );
+    m_overlay->SetLineWidth( pcbIUScale.mmToIU( 0.1 ) );
+
+    // The distance the rules ask for around the moving courtyard
+    for( const auto& [footprint, layer, clearance] : m_outlines )
+    {
+        SHAPE_POLY_SET outline = footprint->GetCourtyard( layer );
+        outline.Inflate( clearance, CORNER_STRATEGY::ROUND_ALL_CORNERS, maxError );
+        m_overlay->Polygon( outline );
+    }
+
+    aView->Update( m_overlay.get() );
 }
 
 
@@ -283,6 +339,13 @@ void DRC_INTERACTIVE_COURTYARD_CLEARANCE::ClearConflicts( KIGFX::VIEW* aView )
         item->ClearFlags( COURTYARD_CONFLICT );
         aView->Update( item );
         aView->MarkTargetDirty( KIGFX::TARGET_OVERLAY );
+    }
+
+    if( m_overlay )
+    {
+        m_overlay->Clear();
+        aView->Remove( m_overlay.get() );
+        m_overlay.reset();
     }
 }
 
