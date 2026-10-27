@@ -43,10 +43,9 @@ class VIEW_OVERLAY;
  * Live clearance check run while moving items: the Move tool's counterpart of the collision
  * highlighting the router shows when dragging.
  *
- * Init() indexes everything that is not moving once.  Run() then tests the moving copper and
- * board edges at their current position against the board's clearance, hole clearance, hole to
- * hole and edge clearance rules.  Zone fills are not tested: they are stale during a move and
- * get refilled afterwards.
+ * Init() indexes everything that is not moving once.  Run() then tests the moving copper at its
+ * current position against the board's clearance, hole clearance and edge clearance rules.  Zone
+ * fills are not tested: they are stale during a move and get refilled afterwards.
  */
 class DRC_INTERACTIVE_CLEARANCE : public DRC_TEST_PROVIDER
 {
@@ -80,7 +79,7 @@ public:
 private:
     struct VIOLATION
     {
-        std::shared_ptr<SHAPE> m_shape;         ///< Copper, hole or edge of the moving item
+        std::shared_ptr<SHAPE> m_shape;         ///< Copper or hole of the moving item
         std::shared_ptr<SHAPE> m_otherShape;    ///< Copper or hole it is too close to; null for an edge
         int                    m_clearance;     ///< Distance the rules ask for
     };
@@ -94,23 +93,19 @@ private:
 
     void testCopper( BOARD_ITEM* aItem, const std::shared_ptr<SHAPE>& aShape, PCB_LAYER_ID aLayer,
                      BOARD_ITEM* aOther );
-    void testHoleToHole( BOARD_ITEM* aItem, BOARD_ITEM* aOther );
 
     void report( BOARD_ITEM* aItem, BOARD_ITEM* aOther, std::shared_ptr<SHAPE> aShape,
                  std::shared_ptr<SHAPE> aOtherShape, int aClearance );
 
 private:
     std::vector<BOARD_ITEM*>                m_movingItems;  ///< Moving items with copper or holes
-    std::vector<BOARD_ITEM*>                m_movingEdges;  ///< Moving edge cuts and milled slots
     std::vector<std::unique_ptr<PCB_SHAPE>> m_edges;        ///< Zero-width copies of the edge cuts
 
     DRC_RTREE m_copperTree;
     DRC_RTREE m_edgeTree;
-    DRC_RTREE m_holeTree;
 
     int m_largestClearance;
     int m_largestEdgeClearance;
-    int m_largestHoleToHoleClearance;
     int m_epsilon;
 
     std::map<std::tuple<DRC_CONSTRAINT_T, const BOARD_ITEM*, const BOARD_ITEM*, PCB_LAYER_ID>, int>

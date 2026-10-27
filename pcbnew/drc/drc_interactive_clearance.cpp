@@ -128,12 +128,6 @@ static bool isMilledSlot( const BOARD_ITEM* aItem )
 }
 
 
-static bool isEdgeCut( const BOARD_ITEM* aItem )
-{
-    return aItem->Type() == PCB_SHAPE_T && ( aItem->IsOnLayer( Edge_Cuts ) || aItem->IsOnLayer( Margin ) );
-}
-
-
 /// A copy of an edge cut as DRC measures it: to the middle of the line, so with no width.
 static PCB_SHAPE* zeroWidthCopy( const BOARD_ITEM* aEdge )
 {
@@ -154,7 +148,6 @@ DRC_INTERACTIVE_CLEARANCE::DRC_INTERACTIVE_CLEARANCE( const std::shared_ptr<DRC_
         DRC_TEST_PROVIDER(),
         m_largestClearance( 0 ),
         m_largestEdgeClearance( 0 ),
-        m_largestHoleToHoleClearance( 0 ),
         m_epsilon( 0 )
 {
     SetDRCEngine( aDRCEngine.get() );
@@ -168,32 +161,22 @@ void DRC_INTERACTIVE_CLEARANCE::Init( BOARD* aBoard, const std::vector<BOARD_ITE
 {
     m_board = aBoard;
     m_movingItems.clear();
-    m_movingEdges.clear();
     m_edges.clear();
     m_copperTree.clear();
     m_edgeTree.clear();
-    m_holeTree.clear();
     m_clearanceCache.clear();
     m_violations.clear();
 
     m_epsilon = m_board->GetDesignSettings().GetDRCEpsilon();
+
+    // Already includes the worst clearance and hole clearance rules
     m_largestClearance = m_board->GetMaxClearanceValue();
     m_largestEdgeClearance = 0;
-    m_largestHoleToHoleClearance = 0;
 
     DRC_CONSTRAINT worst;
 
-    if( m_drcEngine->QueryWorstConstraint( CLEARANCE_CONSTRAINT, worst ) )
-        m_largestClearance = std::max( m_largestClearance, worst.GetValue().Min() );
-
-    if( m_drcEngine->QueryWorstConstraint( HOLE_CLEARANCE_CONSTRAINT, worst ) )
-        m_largestClearance = std::max( m_largestClearance, worst.GetValue().Min() );
-
     if( m_drcEngine->QueryWorstConstraint( EDGE_CLEARANCE_CONSTRAINT, worst ) )
         m_largestEdgeClearance = worst.GetValue().Min();
-
-    if( m_drcEngine->QueryWorstConstraint( HOLE_TO_HOLE_CONSTRAINT, worst ) )
-        m_largestHoleToHoleClearance = worst.GetValue().Min();
 
     std::set<BOARD_ITEM*> moving;
 
@@ -209,9 +192,6 @@ void DRC_INTERACTIVE_CLEARANCE::Init( BOARD* aBoard, const std::vector<BOARD_ITE
                 {
                     m_movingItems.push_back( aItem );
                 }
-
-                if( isEdgeCut( aItem ) || isMilledSlot( aItem ) )
-                    m_movingEdges.push_back( aItem );
             };
 
     for( BOARD_ITEM* item : aMovingItems )
@@ -220,7 +200,7 @@ void DRC_INTERACTIVE_CLEARANCE::Init( BOARD* aBoard, const std::vector<BOARD_ITE
         item->RunOnChildren( addMoving, RECURSE_MODE::RECURSE );
     }
 
-    if( m_movingItems.empty() && m_movingEdges.empty() )
+    if( m_movingItems.empty() )
         return;
 
     // The whole board is indexed, which is a noticeable pause only on very large boards
@@ -255,22 +235,12 @@ void DRC_INTERACTIVE_CLEARANCE::Init( BOARD* aBoard, const std::vector<BOARD_ITE
                 return true;
             } );
 
-    // Hole to hole clearance only concerns drills; edge clearance also covers milled slots
-    forEachGeometryItem( { PCB_PAD_T, PCB_VIA_T }, LSET::AllLayersMask(),
+    // DRC treats milled slots as board edges
+    forEachGeometryItem( { PCB_PAD_T }, LSET::AllLayersMask(),
             [&]( BOARD_ITEM* item ) -> bool
             {
-                if( moving.count( item ) )
-                    return true;
-
-                if( isMilledSlot( item ) )
+                if( !moving.count( item ) && isMilledSlot( item ) )
                     m_edgeTree.Insert( item, Edge_Cuts, m_largestEdgeClearance );
-
-                // Microvias are burned before lamination, so later drills must avoid them too
-                if( m_largestHoleToHoleClearance > 0
-                        && ( item->HasDrilledHole() || item->Type() == PCB_VIA_T ) )
-                {
-                    m_holeTree.Insert( item, Edge_Cuts, m_largestHoleToHoleClearance );
-                }
 
                 return true;
             } );
@@ -279,7 +249,7 @@ void DRC_INTERACTIVE_CLEARANCE::Init( BOARD* aBoard, const std::vector<BOARD_ITE
 
 bool DRC_INTERACTIVE_CLEARANCE::Run()
 {
-    if( m_movingItems.empty() && m_movingEdges.empty() )
+    if( m_movingItems.empty() )
         return true;
 
     LSET boardCopper = LSET::AllCuMask( m_board->GetCopperLayerCount() );
@@ -323,55 +293,6 @@ bool DRC_INTERACTIVE_CLEARANCE::Run()
 
                 if( collide( shape.get(), edgeShape.get(), clearance ) )
                     report( item, edge, shape, nullptr, clearance );
-            }
-        }
-
-        if( m_largestHoleToHoleClearance > 0 && item->HasDrilledHole() )
-        {
-            std::set<BOARD_ITEM*> holes;
-
-            for( DRC_RTREE::ITEM_WITH_SHAPE* entry :
-                 m_holeTree.Overlapping( Edge_Cuts, item->GetEffectiveHoleShape()->BBox() ) )
-            {
-                holes.insert( entry->parent );
-            }
-
-            for( BOARD_ITEM* other : holes )
-                testHoleToHole( item, other );
-        }
-    }
-
-    // Board edges that move (footprint cutouts, milled slots) against the static copper
-    for( BOARD_ITEM* edge : m_movingEdges )
-    {
-        std::shared_ptr<SHAPE> edgeShape;
-
-        if( edge->Type() == PCB_PAD_T )
-            edgeShape = edge->GetEffectiveHoleShape();
-        else
-            edgeShape = std::unique_ptr<PCB_SHAPE>( zeroWidthCopy( edge ) )->GetEffectiveShape( Edge_Cuts );
-
-        for( PCB_LAYER_ID layer : boardCopper )
-        {
-            std::set<BOARD_ITEM*> others;
-
-            for( DRC_RTREE::ITEM_WITH_SHAPE* entry :
-                 m_copperTree.Overlapping( layer, edgeShape->BBox( m_largestEdgeClearance ) ) )
-            {
-                others.insert( entry->parent );
-            }
-
-            for( BOARD_ITEM* other : others )
-            {
-                std::shared_ptr<SHAPE> otherShape = copperShapeOf( other, layer );
-
-                if( !otherShape || sitsOnEdge( other ) )
-                    continue;
-
-                int clearance = getClearance( EDGE_CLEARANCE_CONSTRAINT, edge, other, UNDEFINED_LAYER );
-
-                if( collide( edgeShape.get(), otherShape.get(), clearance ) )
-                    report( edge, other, edgeShape, otherShape, clearance );
             }
         }
     }
@@ -460,24 +381,6 @@ void DRC_INTERACTIVE_CLEARANCE::testCopper( BOARD_ITEM* aItem, const std::shared
         if( collide( aShape.get(), otherHole.get(), clearance ) )
             report( aItem, aOther, aShape, otherHole, clearance );
     }
-}
-
-
-void DRC_INTERACTIVE_CLEARANCE::testHoleToHole( BOARD_ITEM* aItem, BOARD_ITEM* aOther )
-{
-    // Blind and buried vias are drilled before lamination; they only matter where they meet
-    if( aItem->Type() == PCB_VIA_T && aOther->Type() == PCB_VIA_T
-            && ( aItem->GetLayerSet() & aOther->GetLayerSet() & LSET::AllCuMask() ).none() )
-    {
-        return;
-    }
-
-    std::shared_ptr<SHAPE_SEGMENT> hole = aItem->GetEffectiveHoleShape();
-    std::shared_ptr<SHAPE_SEGMENT> otherHole = aOther->GetEffectiveHoleShape();
-    int clearance = getClearance( HOLE_TO_HOLE_CONSTRAINT, aItem, aOther, UNDEFINED_LAYER );
-
-    if( clearance > 0 && collide( hole.get(), otherHole.get(), clearance ) )
-        report( aItem, aOther, hole, otherHole, clearance );
 }
 
 
