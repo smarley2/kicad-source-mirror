@@ -143,7 +143,8 @@ public:
      *
      * After invoking the function it expects the user to first click on a point that is going
      * to be used as the center of the arc. The second click determines the origin and radius,
-     * the third one - the angle.
+     * the third one - the angle.  In the Keep Arc Endpoints edit mode the clicks are the start,
+     * the end and a point the middle of the arc follows.
      */
     int DrawArc( const TOOL_EVENT& aEvent );
 

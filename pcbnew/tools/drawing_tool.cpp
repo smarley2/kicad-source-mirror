@@ -2812,6 +2812,37 @@ static void updateArcFromConstructionMgr( const KIGFX::PREVIEW::ARC_GEOM_MANAGER
 }
 
 
+/**
+ * Update an arc PCB_SHAPE drawn from its endpoints: a line to the cursor until the end is clicked,
+ * then an arc whose middle follows the cursor.  Like dragging the middle of an arc in the Keep Arc
+ * Endpoints mode, the middle stays at least 1% of the chord off it.
+ */
+static void updateArcFromEndpoints( const std::vector<VECTOR2I>& aPoints, const VECTOR2I& aCursor,
+                                    PCB_SHAPE& aArc )
+{
+    if( aPoints.size() == 1 )
+    {
+        aArc.SetShape( SHAPE_T::SEGMENT );
+        aArc.SetStart( aPoints[0] );
+        aArc.SetEnd( aCursor );
+        return;
+    }
+
+    const VECTOR2I& start = aPoints[0];
+    const VECTOR2I& end = aPoints[1];
+    VECTOR2I        chordMid = ( start + end ) / 2;
+    VECTOR2D        normal = VECTOR2D( end - start ).Perpendicular().Resize( 1.0 );
+    double          bulge = VECTOR2D( aCursor - chordMid ).Dot( normal );
+    double          minBulge = ( end - start ).EuclideanNorm() / 100.0;
+
+    if( std::abs( bulge ) < minBulge )
+        bulge = bulge < 0 ? -minBulge : minBulge;
+
+    aArc.SetShape( SHAPE_T::ARC );
+    aArc.SetArcGeometry( start, chordMid + KiROUND( normal * bulge ), end );
+}
+
+
 bool DRAWING_TOOL::drawArc( const TOOL_EVENT& aTool, PCB_SHAPE** aGraphic,
                             std::optional<VECTOR2D> aStartingPoint )
 {
@@ -2862,6 +2893,9 @@ bool DRAWING_TOOL::drawArc( const TOOL_EVENT& aTool, PCB_SHAPE** aGraphic,
 
     bool started = false;
     bool cancelled = false;
+    bool byEndpoints = false;
+
+    std::vector<VECTOR2I> arcPoints;    // Start, end and bulge clicks when drawing by endpoints
 
     m_toolMgr->PostAction( ACTIONS::refreshPreview );
 
@@ -2873,6 +2907,14 @@ bool DRAWING_TOOL::drawArc( const TOOL_EVENT& aTool, PCB_SHAPE** aGraphic,
     {
         if( started )
             m_frame->SetMsgPanel( graphic );
+
+        // The Keep Arc Endpoints edit mode also draws arcs from their endpoints
+        if( !started )
+        {
+            byEndpoints = ( m_isFootprintEditor ? m_frame->GetFootprintEditorSettings()->m_ArcEditMode
+                                                : m_frame->GetPcbNewSettings()->m_ArcEditMode )
+                          == ARC_EDIT_MODE::KEEP_ENDPOINTS_OR_START_DIRECTION;
+        }
 
         setCursor();
 
@@ -2950,22 +2992,42 @@ bool DRAWING_TOOL::drawArc( const TOOL_EVENT& aTool, PCB_SHAPE** aGraphic,
                 started = true;
             }
 
-            arcManager.AddPoint( cursorPos, true );
+            if( byEndpoints )
+            {
+                if( arcPoints.empty() || cursorPos != arcPoints.back() )
+                    arcPoints.push_back( cursorPos );
+            }
+            else
+            {
+                arcManager.AddPoint( cursorPos, true );
+            }
         }
         else if( evt->IsAction( &PCB_ACTIONS::deleteLastPoint ) )
         {
             // Snap guides persist in the grid helper until the tool exits, so a mid-draw backup
             // must clear them or they linger on screen.
             grid.FullReset();
-            arcManager.RemoveLastPoint();
+
+            if( byEndpoints )
+            {
+                if( !arcPoints.empty() )
+                    arcPoints.pop_back();
+            }
+            else
+            {
+                arcManager.RemoveLastPoint();
+            }
         }
         else if( evt->IsMotion() )
         {
-            // set angle snap
-            arcManager.SetAngleSnap( angleSnap != LEADER_MODE::DIRECT );
+            if( !byEndpoints )
+            {
+                // set angle snap
+                arcManager.SetAngleSnap( angleSnap != LEADER_MODE::DIRECT );
 
-            // update, but don't step the manager state
-            arcManager.AddPoint( cursorPos, false );
+                // update, but don't step the manager state
+                arcManager.AddPoint( cursorPos, false );
+            }
         }
         else if( evt->IsAction( &PCB_ACTIONS::layerChanged ) )
         {
@@ -3071,7 +3133,18 @@ bool DRAWING_TOOL::drawArc( const TOOL_EVENT& aTool, PCB_SHAPE** aGraphic,
             evt->SetPassEvent();
         }
 
-        if( arcManager.IsComplete() )
+        if( byEndpoints )
+        {
+            if( !arcPoints.empty() )
+            {
+                updateArcFromEndpoints( arcPoints, cursorPos, *graphic );
+                m_view->Update( &preview );
+            }
+
+            if( arcPoints.size() == 3 )
+                break;
+        }
+        else if( arcManager.IsComplete() )
         {
             break;
         }
